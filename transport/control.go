@@ -46,8 +46,9 @@ const (
 	// The default value of flow control window size in HTTP2 spec.
 	defaultWindowSize = 65535
 	// The initial window size for flow control.
-	initialWindowSize       = defaultWindowSize * 32 // for an RPC
-	initialConnWindowSize   = initialWindowSize * 16 // for a connection
+	initialWindowSize       = defaultWindowSize      // for an RPC
+	maxWindowSize           = defaultWindowSize * 32 // for an RPC
+	initialConnWindowSize   = maxWindowSize * 2      // for a connection
 	infinity                = time.Duration(math.MaxInt64)
 	defaultKeepaliveTime    = infinity
 	defaultKeepaliveTimeout = time.Duration(20 * time.Second)
@@ -149,10 +150,20 @@ func (qb *quotaPool) acquire() <-chan int {
 
 // inFlow deals with inbound flow control
 type inFlow struct {
-	// The inbound flow control limit for pending data.
-	limit uint32
+	// The upper bound for the inbound flow control limit.
+	maxLimit uint32
 
 	mu sync.Mutex
+
+	// The current inbound flow control limit for pending data. This starts out
+	// with an initial vaulue and it increases (up to maxLimit) as data is
+	// received.
+	currentLimit uint32
+
+	// The total amount of data received, only updated until the maximum window
+	// size is reached.
+	totalReceived uint32
+
 	// pendingData is the overall data which have been received but not been
 	// consumed by applications.
 	pendingData uint32
@@ -166,8 +177,8 @@ func (f *inFlow) onData(n uint32) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pendingData += n
-	if f.pendingData+f.pendingUpdate > f.limit {
-		return fmt.Errorf("received %d-bytes data exceeding the limit %d bytes", f.pendingData+f.pendingUpdate, f.limit)
+	if f.pendingData+f.pendingUpdate > f.maxLimit {
+		return fmt.Errorf("received %d-bytes data exceeding the limit %d bytes", f.pendingData+f.pendingUpdate, f.maxLimit)
 	}
 	return nil
 }
@@ -180,9 +191,21 @@ func (f *inFlow) onRead(n uint32) uint32 {
 	if f.pendingData == 0 {
 		return 0
 	}
+	if f.currentLimit < f.maxLimit {
+		f.totalReceived += n
+		if f.totalReceived >= f.currentLimit {
+			// Double the window size.
+			newLimit := f.currentLimit * 2
+			if newLimit > f.maxLimit {
+				newLimit = f.maxLimit
+			}
+			f.pendingUpdate += newLimit - f.currentLimit
+			f.currentLimit = newLimit
+		}
+	}
 	f.pendingData -= n
 	f.pendingUpdate += n
-	if f.pendingUpdate >= f.limit/4 {
+	if f.pendingUpdate >= f.currentLimit/4 {
 		wu := f.pendingUpdate
 		f.pendingUpdate = 0
 		return wu

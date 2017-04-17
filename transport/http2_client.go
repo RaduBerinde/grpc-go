@@ -220,7 +220,7 @@ func newHTTP2Client(ctx context.Context, addr TargetInfo, opts ConnectOptions) (
 		hBuf:            &buf,
 		hEnc:            hpack.NewEncoder(&buf),
 		controlBuf:      newRecvBuffer(),
-		fc:              &inFlow{limit: initialConnWindowSize},
+		fc:              &inFlow{currentLimit: initialConnWindowSize, maxLimit: initialConnWindowSize},
 		sendQuotaPool:   newQuotaPool(defaultWindowSize),
 		scheme:          scheme,
 		state:           reachable,
@@ -295,7 +295,7 @@ func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
 		method:        callHdr.Method,
 		sendCompress:  callHdr.SendCompress,
 		buf:           newRecvBuffer(),
-		fc:            &inFlow{limit: initialWindowSize},
+		fc:            &inFlow{currentLimit: initialWindowSize, maxLimit: maxWindowSize},
 		sendQuotaPool: newQuotaPool(int(t.streamSendQuota)),
 		headerChan:    make(chan struct{}),
 	}

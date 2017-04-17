@@ -141,7 +141,7 @@ func newHTTP2Server(conn net.Conn, config *ServerConfig) (_ ServerTransport, err
 		maxStreams:      maxStreams,
 		inTapHandle:     config.InTapHandle,
 		controlBuf:      newRecvBuffer(),
-		fc:              &inFlow{limit: initialConnWindowSize},
+		fc:              &inFlow{currentLimit: initialConnWindowSize, maxLimit: initialConnWindowSize},
 		sendQuotaPool:   newQuotaPool(defaultWindowSize),
 		state:           reachable,
 		writableChan:    make(chan int, 1),
@@ -170,7 +170,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 		id:  frame.Header().StreamID,
 		st:  t,
 		buf: buf,
-		fc:  &inFlow{limit: initialWindowSize},
+		fc:  &inFlow{currentLimit: initialWindowSize, maxLimit: maxWindowSize},
 	}
 
 	var state decodeState
